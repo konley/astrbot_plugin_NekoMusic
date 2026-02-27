@@ -21,26 +21,29 @@ class MusicSearchDrawer:
         FONT_PATH_BOLD := FONT_PATH_REGULAR,
     ]
 
-    # 颜色定义
-    COLOR_BG_START = (248, 250, 255)
-    COLOR_BG_END = (255, 252, 248)
-    COLOR_HEADER = (0, 40, 100)
-    COLOR_SUBTITLE = (80, 80, 80)
-    COLOR_SONG_NAME = (0, 60, 130)
-    COLOR_SONG_INFO = (70, 70, 70)
-    COLOR_CARD_BG = (255, 255, 255)
-    COLOR_CARD_OUTLINE = (220, 225, 235)
-    COLOR_ACCENT = (0, 90, 180)
-    COLOR_FOOTER = (100, 100, 100)
+    # 颜色定义 - 二次元风格配色
+    COLOR_BG_START = (255, 245, 248)  # 樱花粉渐变起始
+    COLOR_BG_END = (245, 248, 255)    # 天空蓝渐变结束
+    COLOR_HEADER = (102, 78, 163)     # 梦幻紫
+    COLOR_SUBTITLE = (158, 158, 158)  # 柔和灰
+    COLOR_SONG_NAME = (68, 68, 68)    # 深灰
+    COLOR_SONG_INFO = (142, 142, 142) # 浅灰
+    COLOR_CARD_BG = (255, 255, 255)   # 纯白
+    COLOR_CARD_OUTLINE = (230, 230, 250) # 淡紫边框
+    COLOR_ACCENT = (255, 107, 157)    # 粉色强调色
+    COLOR_ACCENT_SECOND = (78, 205, 196) # 青色辅助色
+    COLOR_FOOTER = (180, 180, 180)    # 底部文字颜色
+    COLOR_NUMBER_BG = (255, 107, 157) # 序号背景粉色
+    COLOR_NUMBER_TEXT = (255, 255, 255) # 序号文字白色
 
     # 布局尺寸
     # Telegram 图片限制: 宽度最大 1280px, 高度最大 2560px, 大小最大 10MB
     # 使用较小的宽度以确保兼容性和快速加载
-    IMG_WIDTH = 700  # 从 800 调整为 700,更适合移动端和 Telegram
-    PADDING = 20     # 从 25 调整为 20
-    HEADER_HEIGHT = 90  # 从 100 调整为 90
-    ITEM_HEIGHT = 110   # 从 120 调整为 110
-    FOOTER_HEIGHT = 60
+    IMG_WIDTH = 720  # 优化宽度
+    PADDING = 24     # 内边距
+    HEADER_HEIGHT = 140  # 标题区域高度（增加）
+    ITEM_HEIGHT = 120    # 每首歌曲的高度
+    FOOTER_HEIGHT = 60   # 底部高度（减少）
 
     def __init__(self):
         self._load_fonts()
@@ -154,7 +157,7 @@ class MusicSearchDrawer:
             draw.line([(x2, y1 + radius), (x2, y2 - radius)], fill=outline, width=width)
 
     async def draw_search_result(self, keyword: str, result_data: dict, session) -> bytes:
-        """绘制搜索结果图片"""
+        """绘制搜索结果图片 - 二次元风格（使用 PIL）"""
         try:
             songs = result_data.get("songs", [])
             total = result_data.get("total", 0)
@@ -169,44 +172,87 @@ class MusicSearchDrawer:
             # 绘制渐变背景
             self._draw_gradient(draw, self.IMG_WIDTH, total_height, self.COLOR_BG_START, self.COLOR_BG_END)
 
-            # 绘制顶部装饰条
-            draw.rectangle([(0, 0), (self.IMG_WIDTH, 8)], fill=self.COLOR_ACCENT)
+            # 绘制顶部装饰条（渐变色）
+            self._draw_gradient(draw, self.IMG_WIDTH, 6, self.COLOR_ACCENT, self.COLOR_ACCENT_SECOND)
 
-            # 绘制标题
+            # 绘制标题区域背景
+            header_bg_y = self.HEADER_HEIGHT - 20
+            self._draw_rounded_rectangle(
+                draw,
+                (self.PADDING - 8, 6, self.IMG_WIDTH - self.PADDING + 8, header_bg_y),
+                radius=12,
+                fill=(255, 255, 255),
+                outline=self.COLOR_CARD_OUTLINE,
+                width=1
+            )
+
+            # 绘制标题（带阴影效果）
             title_text = "音乐搜索"
-            draw.text((self.PADDING, 25), title_text, font=self.font_title, fill=self.COLOR_HEADER)
+            title_bbox = draw.textbbox((0, 0), title_text, font=self.font_title)
+            title_width = title_bbox[2] - title_bbox[0]
+            title_x = (self.IMG_WIDTH - title_width) // 2
 
-            # 绘制关键词和结果数
-            keyword_text = f"关键词: {keyword}"
-            keyword_bbox = draw.textbbox((0, 0), keyword_text, font=self.font_subtitle)
+            # 阴影
+            draw.text((title_x + 2, 28 + 2), title_text, font=self.font_title, fill=(200, 200, 200))
+            # 主标题
+            draw.text((title_x, 28), title_text, font=self.font_title, fill=self.COLOR_HEADER)
+
+            # 绘制关键词标签
+            keyword_label = f"搜索: {keyword}"
+            keyword_bbox = draw.textbbox((0, 0), keyword_label, font=self.font_subtitle)
             keyword_width = keyword_bbox[2] - keyword_bbox[0]
-            draw.text((self.IMG_WIDTH - self.PADDING - keyword_width, 32), keyword_text,
-                     font=self.font_subtitle, fill=self.COLOR_SUBTITLE)
+            keyword_x = (self.IMG_WIDTH - keyword_width) // 2
+            draw.text((keyword_x, 70), keyword_label, font=self.font_subtitle, fill=self.COLOR_ACCENT)
 
-            result_text = f"共找到 {total} 首歌曲"
-            draw.text((self.PADDING, 70), result_text, font=self.font_subtitle, fill=self.COLOR_SUBTITLE)
-
-            # 绘制分割线
-            draw.line([(self.PADDING, self.HEADER_HEIGHT - 5), (self.IMG_WIDTH - self.PADDING, self.HEADER_HEIGHT - 5)],
-                     fill=(200, 200, 200), width=2)
+            # 绘制结果数
+            result_text = f"找到 {total} 首歌曲"
+            result_bbox = draw.textbbox((0, 0), result_text, font=self.font_subtitle)
+            result_width = result_bbox[2] - result_bbox[0]
+            result_x = (self.IMG_WIDTH - result_width) // 2
+            draw.text((result_x, 92), result_text, font=self.font_subtitle, fill=self.COLOR_SUBTITLE)
 
             # 绘制每首歌曲
             y_offset = self.HEADER_HEIGHT
             for idx, song_info in enumerate(songs, 1):
-                # 绘制卡片背景（交替颜色）
-                card_bg = self.COLOR_CARD_BG if idx % 2 == 1 else (248, 250, 255)
+                # 绘制卡片背景（圆角矩形）
+                card_y_start = y_offset + 8
+                card_y_end = y_offset + self.ITEM_HEIGHT - 8
+
+                # 卡片阴影
+                shadow_offset = 3
                 self._draw_rounded_rectangle(
                     draw,
-                    (self.PADDING, y_offset + 5, self.IMG_WIDTH - self.PADDING, y_offset + self.ITEM_HEIGHT - 5),
-                    radius=10,
-                    fill=card_bg,
-                    outline=self.COLOR_CARD_OUTLINE,
-                    width=1
+                    (self.PADDING + shadow_offset, card_y_start + shadow_offset,
+                     self.IMG_WIDTH - self.PADDING + shadow_offset, card_y_end + shadow_offset),
+                    radius=16,
+                    fill=(240, 240, 245)
                 )
 
-                # 绘制序号
-                draw.text((self.PADDING + 15, y_offset + 15), str(idx),
-                         font=self.font_song_name, fill=self.COLOR_ACCENT)
+                # 卡片主体
+                self._draw_rounded_rectangle(
+                    draw,
+                    (self.PADDING, card_y_start, self.IMG_WIDTH - self.PADDING, card_y_end),
+                    radius=16,
+                    fill=self.COLOR_CARD_BG,
+                    outline=self.COLOR_CARD_OUTLINE,
+                    width=2
+                )
+
+                # 绘制序号（圆形背景）
+                number_x = self.PADDING + 28
+                number_y = y_offset + 52
+                number_radius = 20
+                draw.ellipse([
+                    (number_x - number_radius, number_y - number_radius),
+                    (number_x + number_radius, number_y + number_radius)
+                ], fill=self.COLOR_NUMBER_BG)
+
+                # 序号文字
+                number_bbox = draw.textbbox((0, 0), str(idx), font=self.font_song_name)
+                number_w = number_bbox[2] - number_bbox[0]
+                number_h = number_bbox[3] - number_bbox[1]
+                draw.text((number_x - number_w // 2, number_y - number_h // 2), str(idx),
+                         font=self.font_song_name, fill=self.COLOR_NUMBER_TEXT)
 
                 # 下载封面图片
                 cover_url = song_info.get("cover_url")
@@ -216,41 +262,79 @@ class MusicSearchDrawer:
                             if cover_response.status == 200:
                                 cover_data = await cover_response.read()
                                 cover_img = Image.open(io.BytesIO(cover_data))
-                                cover_img = cover_img.resize((100, 100), Image.Resampling.LANCZOS)
-                                img.paste(cover_img, (self.PADDING + 55, y_offset + 10))
+
+                                # 制作圆形封面
+                                cover_size = 90
+                                mask = Image.new('L', (cover_size, cover_size), 0)
+                                draw_mask = ImageDraw.Draw(mask)
+                                draw_mask.ellipse([(0, 0), (cover_size, cover_size)], fill=255)
+
+                                cover_img = cover_img.resize((cover_size, cover_size), Image.Resampling.LANCZOS)
+                                cover_img.putalpha(mask)
+
+                                # 封面阴影
+                                cover_shadow_x = self.PADDING + 70 + 2
+                                cover_shadow_y = y_offset + 20 + 2
+                                draw.ellipse([
+                                    (cover_shadow_x, cover_shadow_y),
+                                    (cover_shadow_x + cover_size, cover_shadow_y + cover_size)
+                                ], fill=(220, 220, 230))
+
+                                # 封面主体
+                                img.paste(cover_img, (self.PADDING + 70, y_offset + 20), cover_img)
                     except Exception as e:
                         logger.error(f"下载封面失败: {str(e)}")
 
                 # 解析歌曲信息
                 text_lines = song_info.get("text", "").split('\n')
-                line_y = y_offset + 15
-                text_x = self.PADDING + 180
+                line_y = y_offset + 20
+                text_x = self.PADDING + 185
 
                 for line_idx, line in enumerate(text_lines):
                     if line_idx == 0:  # 歌曲名
                         draw.text((text_x, line_y), line, font=self.font_song_name, fill=self.COLOR_SONG_NAME)
-                    else:  # 其他信息
+                        line_y += 24  # 歌曲名后间距
+                    else:  # 其他信息（歌手、专辑、ID）
                         draw.text((text_x, line_y), line, font=self.font_song_info, fill=self.COLOR_SONG_INFO)
-                    line_y += 24
+                        line_y += 20  # 其他信息行间距
 
                 y_offset += self.ITEM_HEIGHT
 
+            # 绘制底部装饰区域
+            footer_y_start = total_height - self.FOOTER_HEIGHT - self.PADDING
+            self._draw_rounded_rectangle(
+                draw,
+                (self.PADDING, footer_y_start, self.IMG_WIDTH - self.PADDING, total_height - self.PADDING // 2),
+                radius=16,
+                fill=(255, 255, 255),
+                outline=self.COLOR_CARD_OUTLINE,
+                width=1
+            )
+
+            # 绘制底部装饰条
+            self._draw_gradient(draw, self.IMG_WIDTH - self.PADDING * 2, 4,
+                               self.COLOR_ACCENT, self.COLOR_ACCENT_SECOND)
+            draw.rectangle([
+                (self.PADDING, footer_y_start),
+                (self.IMG_WIDTH - self.PADDING, footer_y_start + 4)
+            ], fill=self.COLOR_ACCENT)
+
             # 绘制底部版权（两行）
             footer_text1 = "Neko云音乐 - Powered by 不穿胖次の小奶猫"
-            footer_text2 = "music.cnmsb.xin 蜀ICP备2025177767号-1"
+            footer_text2 = "music.cnmsb.xin | 蜀ICP备2025177767号-1"
 
             # 第一行
             footer_bbox1 = draw.textbbox((0, 0), footer_text1, font=self.font_footer)
             footer_width1 = footer_bbox1[2] - footer_bbox1[0]
             footer_x1 = (self.IMG_WIDTH - footer_width1) // 2
-            draw.text((footer_x1, total_height - self.FOOTER_HEIGHT + 8), footer_text1,
+            draw.text((footer_x1, footer_y_start + 12), footer_text1,
                      font=self.font_footer, fill=self.COLOR_FOOTER)
 
             # 第二行
             footer_bbox2 = draw.textbbox((0, 0), footer_text2, font=self.font_footer)
             footer_width2 = footer_bbox2[2] - footer_bbox2[0]
             footer_x2 = (self.IMG_WIDTH - footer_width2) // 2
-            draw.text((footer_x2, total_height - self.FOOTER_HEIGHT + 26), footer_text2,
+            draw.text((footer_x2, footer_y_start + 26), footer_text2,
                      font=self.font_footer, fill=self.COLOR_FOOTER)
 
             # 转换为 bytes
@@ -533,7 +617,7 @@ class Main(Star):
 
                         if temp_file_size_mb > max_size_mb:
                             logger.info(f"文件过大 ({temp_file_size_mb:.2f}MB)，开始压缩...")
-                            yield event.plain_result(f"⏳ 文件较大 ({temp_file_size_mb:.2f}MB)，正在压缩中，请稍候...")
+                            yield event.plain_result(f"文件较大 ({temp_file_size_mb:.2f}MB)，正在压缩中，请稍候...")
                             
                             # 使用 ffmpeg 压缩音频
                             compressed_path = temp_path.replace(audio_format, f'_compressed{audio_format}')
@@ -542,7 +626,7 @@ class Main(Star):
                                 import shutil
                                 if not shutil.which('ffmpeg'):
                                     logger.error("ffmpeg 未安装，无法压缩音频")
-                                    yield event.plain_result(f"❌ 音频文件过大 ({temp_file_size_mb:.2f}MB)，但 ffmpeg 未安装无法压缩\n请直接点击播放链接收听: {play_url}")
+                                    yield event.plain_result(f"音频文件过大 ({temp_file_size_mb:.2f}MB)，但 ffmpeg 未安装无法压缩\n请直接点击播放链接收听: {play_url}")
                                     os.unlink(temp_path)
                                     return
 
@@ -567,7 +651,7 @@ class Main(Star):
                                 
                                 if process.returncode != 0:
                                     logger.error(f"ffmpeg 压缩失败: {stderr.decode()}")
-                                    yield event.plain_result(f"❌ 音频压缩失败，请直接点击播放链接收听: {play_url}")
+                                    yield event.plain_result(f"音频压缩失败，请直接点击播放链接收听: {play_url}")
                                     os.unlink(temp_path)
                                     return
                                 
