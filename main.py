@@ -1,3 +1,4 @@
+import asyncio
 import io
 import os
 import textwrap
@@ -509,12 +510,11 @@ class Main(Star):
                         audio_size_mb = len(audio_data) / (1024 * 1024)
                         logger.info(f"音频数据大小: {len(audio_data)} bytes ({audio_size_mb:.2f} MB)")
 
-                        # Telegram 限制: 语音文件最大 50MB, 超过建议使用音频文件
-                        if platform == 'telegram' and audio_size_mb > 50:
-                            logger.warning(f"音频文件过大 ({audio_size_mb:.2f}MB), 超过 Telegram 语音限制 50MB")
-                            yield event.plain_result(f"⚠️ 音频文件较大 ({audio_size_mb:.2f}MB)，超过 Telegram 语音限制\n请直接点击播放链接收听: {play_url}")
-                            return
-
+                        # 平台限制检查和音频压缩
+                        # Telegram: 语音文件最大 50MB
+                        # QQ: 语音消息通常限制在 10MB 以内
+                        max_size_mb = 50 if platform == 'telegram' else 10
+                        
                         # 根据平台选择音频格式
                         # Telegram 支持 MP3, OGG, M4A 等格式
                         # QQ 主要支持 SILK/AMR 格式，但也支持发送音频文件
@@ -526,6 +526,73 @@ class Main(Star):
                             temp_file.write(audio_data)
                             temp_path = temp_file.name
                         logger.info(f"音频已保存到临时文件: {temp_path}")
+
+                        # 检查文件大小，如果超过限制则压缩
+                        temp_file_size_mb = os.path.getsize(temp_path) / (1024 * 1024)
+                        logger.info(f"临时文件大小: {temp_file_size_mb:.2f} MB")
+
+                        if temp_file_size_mb > max_size_mb:
+                            logger.info(f"文件过大 ({temp_file_size_mb:.2f}MB)，开始压缩...")
+                            yield event.plain_result(f"⏳ 文件较大 ({temp_file_size_mb:.2f}MB)，正在压缩中，请稍候...")
+                            
+                            # 使用 ffmpeg 压缩音频
+                            compressed_path = temp_path.replace(audio_format, f'_compressed{audio_format}')
+                            try:
+                                # 检查 ffmpeg 是否可用
+                                import shutil
+                                if not shutil.which('ffmpeg'):
+                                    logger.error("ffmpeg 未安装，无法压缩音频")
+                                    yield event.plain_result(f"❌ 音频文件过大 ({temp_file_size_mb:.2f}MB)，但 ffmpeg 未安装无法压缩\n请直接点击播放链接收听: {play_url}")
+                                    os.unlink(temp_path)
+                                    return
+
+                                # 使用 ffmpeg 压缩
+                                # 目标：降低比特率到 128kbps，采样率到 44100Hz，保留双声道
+                                compress_cmd = [
+                                    'ffmpeg', '-i', temp_path,
+                                    '-b:a', '128k',  # 音频比特率 128kbps
+                                    '-ar', '44100',  # 采样率 44100Hz
+                                    '-ac', '2',      # 双声道
+                                    '-y',            # 覆盖输出文件
+                                    compressed_path
+                                ]
+                                
+                                process = await asyncio.create_subprocess_exec(
+                                    *compress_cmd,
+                                    stdout=asyncio.subprocess.PIPE,
+                                    stderr=asyncio.subprocess.PIPE
+                                )
+                                
+                                stdout, stderr = await process.communicate()
+                                
+                                if process.returncode != 0:
+                                    logger.error(f"ffmpeg 压缩失败: {stderr.decode()}")
+                                    yield event.plain_result(f"❌ 音频压缩失败，请直接点击播放链接收听: {play_url}")
+                                    os.unlink(temp_path)
+                                    return
+                                
+                                # 检查压缩后的大小
+                                compressed_size_mb = os.path.getsize(compressed_path) / (1024 * 1024)
+                                logger.info(f"压缩完成: {temp_file_size_mb:.2f}MB → {compressed_size_mb:.2f}MB")
+                                
+                                # 删除原文件，使用压缩后的文件
+                                os.unlink(temp_path)
+                                temp_path = compressed_path
+                                
+                                # 如果压缩后仍然过大
+                                if compressed_size_mb > max_size_mb:
+                                    logger.warning(f"压缩后仍然过大 ({compressed_size_mb:.2f}MB)")
+                                    yield event.plain_result(f"音频压缩后仍较大 ({compressed_size_mb:.2f}MB)，可能发送失败\n请直接点击播放链接收听: {play_url}")
+                                    # 不返回，继续尝试发送
+                                else:
+                                    #yield event.plain_result(f"压缩完成 ({compressed_size_mb:.2f}MB)，开始发送...")
+                                    logger.info(f"压缩完成 ({compressed_size_mb:.2f}MB)，开始发送...")
+                                    
+                            except Exception as compress_error:
+                                logger.error(f"压缩音频时发生错误: {str(compress_error)}")
+                                import traceback
+                                logger.error(traceback.format_exc())
+                                #yield event.plain_result(f"压缩失败，尝试发送原文件\n请直接点击播放链接收听: {play_url}")
 
                         # 发送语音（使用 Record 组件，传入文件路径）
                         # Record 组件会自动根据平台适配格式
@@ -541,7 +608,6 @@ class Main(Star):
                             yield event.plain_result(f"⚠️ 语音发送失败，请直接点击播放链接收听: {play_url}")
 
                         # 清理临时文件
-                        import os
                         try:
                             os.unlink(temp_path)
                             logger.info(f"已清理临时文件: {temp_path}")
