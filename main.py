@@ -162,6 +162,11 @@ class MusicSearchDrawer:
             songs = result_data.get("songs", [])
             total = result_data.get("total", 0)
 
+            # 检查 songs 是否为 None
+            if songs is None:
+                logger.error("songs 为 None，无法绘制图片")
+                return None
+
             # 计算总高度
             total_height = self.HEADER_HEIGHT + len(songs) * self.ITEM_HEIGHT + self.FOOTER_HEIGHT + self.PADDING * 3
 
@@ -354,7 +359,8 @@ class Main(Star):
     def __init__(self, context: Context):
         super().__init__(context)
         self.drawer = MusicSearchDrawer()
-        # 存储每个会话的搜索结果，格式: {session_id: {"songs": [...], "timestamp": ...}}
+        # 存储每个消息的搜索结果，格式: {message_id: {"songs": [...], "timestamp": ...}}
+        # 使用消息ID而不是session_id，这样同一会话中多次搜索不会互相覆盖
         self.search_results = {}
 
     @filter.regex(r"^点歌.*")
@@ -377,11 +383,18 @@ class Main(Star):
                         data = await response.json()
                         result_data = self.handle_search_result(data)
 
-                        # 保存搜索结果到会话
-                        session_id = event.session_id
-                        self.search_results[session_id] = {
-                            "songs": data.get("results", [])
+                        # 获取当前消息的消息ID
+                        message_id = self._get_message_id(event)
+                        logger.info(f"搜索音乐，消息ID: {message_id}")
+
+                        # 保存搜索结果，使用消息ID作为键
+                        results = data.get("results")
+                        if results is None:
+                            results = []
+                        self.search_results[message_id] = {
+                            "songs": results
                         }
+                        logger.info(f"搜索结果已保存，消息ID: {message_id}, 歌曲数: {len(results)}")
 
                         # 使用 drawer 绘制图片
                         image_bytes = await self.drawer.draw_search_result(keyword, result_data, session)
@@ -389,13 +402,13 @@ class Main(Star):
                         if image_bytes:
                             # 获取当前平台
                             platform = self._get_platform(event)
-                            
-                            # 构建提示文本
+
+                            # 构建提示文本（在文本中嵌入消息ID，用于后续匹配）
                             if platform == 'telegram':
-                                hint_text = f"🎵 搜索结果: {keyword}\n共找到 {result_data.get('total', 0)} 首歌曲\n💡 点击回复按钮并输入序号即可播放"
+                                hint_text = f"🎵 搜索结果: {keyword}\n共找到 {result_data.get('total', 0)} 首歌曲\n💡 点击回复按钮并输入序号即可播放\n[MID:{message_id}]"
                             else:
-                                hint_text = f"🎵 搜索结果: {keyword}\n共找到 {result_data.get('total', 0)} 首歌曲\n💡 回复序号即可播放,例如: 1"
-                            
+                                hint_text = f"🎵 搜索结果: {keyword}\n共找到 {result_data.get('total', 0)} 首歌曲\n💡 回复序号即可播放,例如: 1\n[MID:{message_id}]"
+
                             yield event.chain_result([
                                 Comp.Plain(hint_text),
                                 Comp.Image.fromBytes(image_bytes)
@@ -414,6 +427,12 @@ class Main(Star):
 
         if data.get("success") and data.get("results"):
             songs = data["results"]
+
+            # 检查 songs 是否为 None
+            if songs is None:
+                logger.error("API 返回的 results 为 None")
+                result["songs"] = [{"cover_url": None, "text": "搜索结果为空"}]
+                return result
 
             if not songs:
                 result["songs"] = [{"cover_url": None, "text": "未找到相关歌曲"}]
@@ -462,7 +481,7 @@ class Main(Star):
                 return platform.name.lower()
             elif isinstance(platform, str):
                 return platform.lower()
-        
+
         # 尝试从 message_obj 中获取
         if hasattr(event, 'message_obj') and hasattr(event.message_obj, 'platform'):
             platform = event.message_obj.platform
@@ -471,9 +490,30 @@ class Main(Star):
                 return platform.name.lower()
             elif isinstance(platform, str):
                 return platform.lower()
-        
+
         # 默认返回 qq
         return 'qq'
+
+    def _get_message_id(self, event: AstrMessageEvent) -> str:
+        """获取消息ID"""
+        # 尝试从 message_obj 中获取 message_id
+        if hasattr(event, 'message_obj') and hasattr(event.message_obj, 'message_id'):
+            message_id = event.message_obj.message_id
+            logger.info(f"从 message_obj.message_id 获取到消息ID: {message_id}")
+            return str(message_id)
+
+        # 尝试从 message 对象中获取
+        if hasattr(event, 'message_obj') and hasattr(event.message_obj, 'message'):
+            components = event.message_obj.message
+            # 查找是否有包含 message_id 的组件
+            for comp in components:
+                if hasattr(comp, 'message_id'):
+                    logger.info(f"从组件中获取到消息ID: {comp.message_id}")
+                    return str(comp.message_id)
+
+        # 如果都获取不到，返回 session_id 作为备用
+        logger.warning(f"无法获取消息ID，使用 session_id 作为备用: {event.session_id}")
+        return str(event.session_id)
 
     @filter.regex(r"^\d+$")
     async def play_music(self, event: AstrMessageEvent):
@@ -534,30 +574,41 @@ class Main(Star):
         index = int(msg_text) - 1  # 转换为 0-based 索引
         logger.info(f"用户输入序号: {msg_text}, 转换后索引: {index}")
 
-        # 获取会话的搜索结果
-        session_id = event.session_id
-        logger.info(f"会话ID: {session_id}")
-        logger.info(f"已保存的搜索结果会话: {list(self.search_results.keys())}")
-        
-        # 处理 Telegram 的会话 ID (可能包含消息 ID, 如: -1001934802217#27946)
-        # 提取群组/聊天 ID 部分（# 之前的部分）
-        match_session_id = session_id.split('#')[0] if '#' in session_id else session_id
-        logger.info(f"匹配使用的会话ID: {match_session_id}")
-        
-        # 检查是否有匹配的搜索结果
-        if match_session_id in self.search_results:
-            search_data = self.search_results[match_session_id]
-            songs = search_data["songs"]
-            logger.info(f"找到 {len(songs)} 首歌曲")
-        elif session_id in self.search_results:
-            # 尝试直接匹配（兼容其他平台）
-            search_data = self.search_results[session_id]
-            songs = search_data["songs"]
-            logger.info(f"直接匹配找到 {len(songs)} 首歌曲")
-        else:
-            # 如果没有搜索结果，不处理（让其他过滤器处理）
-            logger.info(f"会话 {session_id} 或 {match_session_id} 没有搜索结果，跳过播放")
+        # 从引用消息中获取被引用消息的消息ID
+        reply_message_id = None
+
+        # 方法1: 从引用消息的文本中提取 [MID:xxx] 格式的消息ID
+        if hasattr(reply_msg, 'text'):
+            import re
+            mid_match = re.search(r'\[MID:(\d+)\]', reply_msg.text)
+            if mid_match:
+                reply_message_id = mid_match.group(1)
+                logger.info(f"从引用消息文本中提取到消息ID: {reply_message_id}")
+
+        # 方法2: 如果没有找到，尝试直接使用Reply组件的id（这个是机器人回复的消息ID）
+        if not reply_message_id and hasattr(reply_msg, 'id'):
+            reply_message_id = str(reply_msg.id)
+            logger.info(f"从 Reply 组件 id 获取到消息ID: {reply_message_id}")
+
+        # 方法3: 尝试从message_id获取
+        if not reply_message_id and hasattr(reply_msg, 'message_id'):
+            reply_message_id = str(reply_msg.message_id)
+            logger.info(f"从 Reply 组件 message_id 获取到消息ID: {reply_message_id}")
+
+        if not reply_message_id:
+            logger.error("无法从 Reply 组件获取消息ID")
             return
+
+        logger.info(f"已保存的搜索结果消息ID: {list(self.search_results.keys())}")
+
+        # 检查是否有匹配的搜索结果
+        if reply_message_id not in self.search_results:
+            logger.info(f"消息ID {reply_message_id} 没有对应的搜索结果，跳过播放")
+            return
+
+        search_data = self.search_results[reply_message_id]
+        songs = search_data["songs"]
+        logger.info(f"找到 {len(songs)} 首歌曲")
 
         # 检查索引是否有效
         if index < 0 or index >= len(songs):
