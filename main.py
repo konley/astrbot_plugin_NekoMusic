@@ -655,7 +655,7 @@ class Main(Star):
             return
 
         # 生成播放链接
-        play_url = f"{self.api_base_url}/detail/{song_id}"
+        play_url = f"https://mumsic.cnmsb.xin/detail/{song_id}"
         audio_url = f"{self.api_base_url}/api/music/file/{song_id}"
 
         # 先返回播放链接
