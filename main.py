@@ -1,5 +1,6 @@
 import asyncio
 import io
+import json
 import os
 import textwrap
 from typing import Dict, List, Tuple
@@ -354,14 +355,42 @@ class MusicSearchDrawer:
             return None
 
 
-@register("nekomusic", "NyaNyagulugulu", "Neko云音乐点歌插件", "1.7.0", "https://github.com/NyaNyagulugulu/astrbot_NekoMusic")
+@register("nekomusic", "NyaNyagulugulu", "Neko云音乐点歌插件", "1.7.2", "https://github.com/NyaNyagulugulu/astrbot_NekoMusic")
 class Main(Star):
-    def __init__(self, context: Context):
+    def __init__(self, context: Context, config: dict = None):
         super().__init__(context)
         self.drawer = MusicSearchDrawer()
         # 存储每个消息的搜索结果，格式: {message_id: {"songs": [...], "timestamp": ...}}
         # 使用消息ID而不是session_id，这样同一会话中多次搜索不会互相覆盖
         self.search_results = {}
+
+        # 从配置文件 schema 读取默认值
+        schema_path = os.path.join(os.path.dirname(__file__), "_conf_schema.json")
+        schema_defaults = {}
+        try:
+            with open(schema_path, 'r', encoding='utf-8') as f:
+                schema = json.load(f)
+                for key, value in schema.items():
+                    schema_defaults[key] = value.get("default")
+        except Exception as e:
+            logger.warning(f"读取配置 schema 失败: {e}")
+
+        # 从配置文件读取配置，如果不存在则使用 schema 中的默认值
+        self.config = config or {}
+        try:
+            self.use_local_server = self.config.get("use_local_server", schema_defaults.get("use_local_server", False))
+            self.local_server_port = self.config.get("local_server_port", schema_defaults.get("local_server_port", 3000))
+        except Exception:
+            self.use_local_server = schema_defaults.get("use_local_server", False)
+            self.local_server_port = schema_defaults.get("local_server_port", 3000)
+
+        # 设置API基础URL
+        if self.use_local_server:
+            self.api_base_url = f"http://localhost:{self.local_server_port}"
+            logger.info(f"使用本机服务器模式，端口: {self.local_server_port}")
+        else:
+            self.api_base_url = "https://music.cnmsb.xin"
+            logger.info("使用在线服务器模式")
 
     @filter.regex(r"^点歌.*")
     async def search_music(self, event: AstrMessageEvent):
@@ -373,7 +402,7 @@ class Main(Star):
             yield event.plain_result("请输入要搜索的歌曲名称,例如:点歌 Lemon")
             return
 
-        api_url = "https://music.cnmsb.xin/api/music/search"
+        api_url = f"{self.api_base_url}/api/music/search"
         json_data = {"query": keyword}
 
         try:
@@ -453,7 +482,7 @@ class Main(Star):
                 # 使用封面 API 获取封面图片
                 cover_url = None
                 if song_id:
-                    cover_url = f"https://music.cnmsb.xin/api/music/cover/{song_id}"
+                    cover_url = f"{self.api_base_url}/api/music/cover/{song_id}"
 
                 # 构建歌曲信息文本
                 song_text = f"{song_name}\n"
@@ -626,8 +655,8 @@ class Main(Star):
             return
 
         # 生成播放链接
-        play_url = f"https://music.cnmsb.xin/detail/{song_id}"
-        audio_url = f"https://music.cnmsb.xin/api/music/file/{song_id}"
+        play_url = f"{self.api_base_url}/detail/{song_id}"
+        audio_url = f"{self.api_base_url}/api/music/file/{song_id}"
 
         # 先返回播放链接
         yield event.chain_result([

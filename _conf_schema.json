@@ -1,1 +1,14 @@
-{}
+{
+    "use_local_server": {
+        "description": "使用本机服务器",
+        "type": "bool",
+        "default": false,
+        "hint": "开启后所有API请求将使用本机服务器"
+    },
+    "local_server_port": {
+        "description": "本机服务器端口",
+        "type": "int",
+        "default": 65535,
+        "hint": "本机服务器的端口号"
+    }
+}
