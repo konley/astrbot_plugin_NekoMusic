@@ -434,9 +434,9 @@ class Main(Star):
 
                             # 构建提示文本（在文本中嵌入消息ID，用于后续匹配）
                             if platform == 'telegram':
-                                hint_text = f"🎵 搜索结果: {keyword}\n共找到 {result_data.get('total', 0)} 首歌曲\n💡 点击回复按钮并输入序号即可播放"
+                                hint_text = f"🎵 搜索结果: {keyword}\n共找到 {result_data.get('total', 0)} 首歌曲\n💡 点击回复按钮并输入序号即可播放\n[MID:{message_id}]"
                             else:
-                                hint_text = f"🎵 搜索结果: {keyword}\n共找到 {result_data.get('total', 0)} 首歌曲\n💡 回复序号即可播放,例如: 1"
+                                hint_text = f"🎵 搜索结果: {keyword}\n共找到 {result_data.get('total', 0)} 首歌曲\n💡 回复序号即可播放,例如: 1\n[MID:{message_id}]"
 
                             yield event.chain_result([
                                 Comp.Plain(hint_text),
