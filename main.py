@@ -433,10 +433,7 @@ class Main(Star):
                             platform = self._get_platform(event)
 
                             # 构建提示文本（在文本中嵌入消息ID，用于后续匹配）
-                            if platform == 'telegram':
-                                hint_text = f"🎵 搜索结果: {keyword}\n共找到 {result_data.get('total', 0)} 首歌曲\n💡 点击回复按钮并输入序号即可播放\n[MID:{message_id}]"
-                            else:
-                                hint_text = f"🎵 搜索结果: {keyword}\n共找到 {result_data.get('total', 0)} 首歌曲\n💡 回复序号即可播放,例如: 1\n[MID:{message_id}]"
+                            hint_text = f"🎵 搜索结果: {keyword}\n共找到 {result_data.get('total', 0)} 首歌曲\n💡 点击回复按钮并输入序号即可播放，例如: 1\n[MID:{message_id}]"
 
                             yield event.chain_result([
                                 Comp.Plain(hint_text),
@@ -502,25 +499,42 @@ class Main(Star):
 
     def _get_platform(self, event: AstrMessageEvent) -> str:
         """获取当前平台类型"""
+        logger.info(f"_get_platform 开始执行，event 类型: {type(event)}")
+
         # 尝试从事件中获取平台信息
+        logger.info(f"检查 event.platform: {hasattr(event, 'platform')}")
         if hasattr(event, 'platform'):
             platform = event.platform
+            logger.info(f"event.platform 类型: {type(platform)}, 值: {platform}")
             # 处理 PlatformMetadata 对象
             if hasattr(platform, 'name'):
-                return platform.name.lower()
+                result = platform.name.lower()
+                logger.info(f"从 platform.name 获取到: {result}")
+                return result
             elif isinstance(platform, str):
-                return platform.lower()
+                result = platform.lower()
+                logger.info(f"从 platform 字符串获取到: {result}")
+                return result
 
         # 尝试从 message_obj 中获取
-        if hasattr(event, 'message_obj') and hasattr(event.message_obj, 'platform'):
-            platform = event.message_obj.platform
-            # 处理 PlatformMetadata 对象
-            if hasattr(platform, 'name'):
-                return platform.name.lower()
-            elif isinstance(platform, str):
-                return platform.lower()
+        logger.info(f"检查 event.message_obj: {hasattr(event, 'message_obj')}")
+        if hasattr(event, 'message_obj'):
+            logger.info(f"检查 event.message_obj.platform: {hasattr(event.message_obj, 'platform')}")
+            if hasattr(event.message_obj, 'platform'):
+                platform = event.message_obj.platform
+                logger.info(f"message_obj.platform 类型: {type(platform)}, 值: {platform}")
+                # 处理 PlatformMetadata 对象
+                if hasattr(platform, 'name'):
+                    result = platform.name.lower()
+                    logger.info(f"从 message_obj.platform.name 获取到: {result}")
+                    return result
+                elif isinstance(platform, str):
+                    result = platform.lower()
+                    logger.info(f"从 message_obj.platform 字符串获取到: {result}")
+                    return result
 
         # 默认返回 qq
+        logger.info("使用默认平台: qq")
         return 'qq'
 
     def _get_message_id(self, event: AstrMessageEvent) -> str:
@@ -544,28 +558,59 @@ class Main(Star):
         logger.warning(f"无法获取消息ID，使用 session_id 作为备用: {event.session_id}")
         return str(event.session_id)
 
-    @filter.regex(r"^\d+$")
+    @filter.regex(r"^/?\s*\d+$")
     async def play_music(self, event: AstrMessageEvent):
         """播放音乐（通过序号）"""
+        logger.info(f"===== play_music 被触发 =====")
+        logger.info(f"原始 message_str: {repr(event.message_str)}")
+        logger.info(f"event 类型: {type(event)}")
+        logger.info(f"event.message_str 类型: {type(event.message_str)}")
+
         msg_text = event.message_str.strip()
+        logger.info(f"去除空白后的 message_str: {repr(msg_text)}")
+
+        # 去除可能的前导斜杠
+        msg_text = msg_text.lstrip('/')
+        logger.info(f"去除斜杠后的 message_str: {repr(msg_text)}")
+
+        # 去除所有空白字符
+        msg_text = msg_text.strip()
+        logger.info(f"去除所有空白后的 message_str: {repr(msg_text)}")
 
         # 检查是否是纯数字
         if not msg_text.isdigit():
+            logger.info(f"消息不是纯数字: {repr(msg_text)}，跳过")
             return
 
-        platform = self._get_platform(event)
-        logger.info(f"当前平台: {platform}")
+        try:
+            logger.info("开始调用 _get_platform")
+            platform = self._get_platform(event)
+            logger.info(f"当前平台: {platform}")
+        except Exception as e:
+            logger.error(f"_get_platform 调用失败: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            platform = 'telegram'  # Telegram 平台默认值
 
         # 检查是否引用了消息 - 从消息链中查找 Reply 组件
         reply_msg = None
-        if hasattr(event, 'message_obj') and hasattr(event.message_obj, 'message'):
-            components = event.message_obj.message
-            # 遍历消息链查找 Reply 组件
-            for comp in components:
-                if hasattr(comp, 'type') and comp.type == 'Reply':
-                    reply_msg = comp
-                    logger.info(f"找到 Reply 组件: {reply_msg}")
-                    break
+        logger.info(f"检查 event 是否有 message_obj: {hasattr(event, 'message_obj')}")
+        if hasattr(event, 'message_obj'):
+            logger.info(f"检查 message_obj 是否有 message: {hasattr(event.message_obj, 'message')}")
+            if hasattr(event.message_obj, 'message'):
+                components = event.message_obj.message
+                logger.info(f"消息链组件数量: {len(components) if components else 0}")
+                logger.info(f"消息链组件类型: {[type(c).__name__ for c in components] if components else []}")
+
+                # 遍历消息链查找 Reply 组件
+                for idx, comp in enumerate(components):
+                    logger.info(f"组件 {idx}: type={type(comp).__name__}, hasattr type={hasattr(comp, 'type')}")
+                    if hasattr(comp, 'type'):
+                        logger.info(f"组件 {idx} type={comp.type}")
+                        if comp.type == 'Reply':
+                            reply_msg = comp
+                            logger.info(f"找到 Reply 组件: {reply_msg}")
+                            break
 
         if not reply_msg:
             logger.info("没有引用消息，跳过播放")
