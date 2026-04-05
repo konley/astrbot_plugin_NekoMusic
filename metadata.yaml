@@ -8,6 +8,7 @@ homepage: https://github.com/NyaNyagulugulu/astrbot_NekoMusic
 support_platforms: 
  - aiocqhttp
  - telegram 
+ - discord
 astrbot_version: ">=4.10.6,<5"
 tags:
   - 音乐

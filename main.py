@@ -412,28 +412,29 @@ class Main(Star):
                         data = await response.json()
                         result_data = self.handle_search_result(data)
 
-                        # 获取当前消息的消息ID
-                        message_id = self._get_message_id(event)
-                        logger.info(f"搜索音乐，消息ID: {message_id}")
+                        # 获取当前消息的消息ID（用户发送的点歌消息ID）
+                        user_message_id = self._get_message_id(event)
+                        logger.info(f"搜索音乐，用户消息ID: {user_message_id}")
 
-                        # 保存搜索结果，使用消息ID作为键
+                        # 获取当前平台
+                        platform = self._get_platform(event)
+
+                        # 保存搜索结果，使用用户消息ID作为键
                         results = data.get("results")
                         if results is None:
                             results = []
-                        self.search_results[message_id] = {
-                            "songs": results
+                        self.search_results[user_message_id] = {
+                            "songs": results,
+                            "platform": platform  # 保存平台信息
                         }
-                        logger.info(f"搜索结果已保存，消息ID: {message_id}, 歌曲数: {len(results)}")
+                        logger.info(f"搜索结果已保存，用户消息ID: {user_message_id}, 歌曲数: {len(results)}")
 
                         # 使用 drawer 绘制图片
                         image_bytes = await self.drawer.draw_search_result(keyword, result_data, session)
 
                         if image_bytes:
-                            # 获取当前平台
-                            platform = self._get_platform(event)
-
-                            # 构建提示文本（在文本中嵌入消息ID，用于后续匹配）
-                            hint_text = f"🎵 搜索结果: {keyword}\n共找到 {result_data.get('total', 0)} 首歌曲\n💡 点击回复按钮并输入序号即可播放，例如: 1\n[MID:{message_id}]"
+                            # 构建提示文本（在文本中嵌入用户消息ID，用于后续匹配）
+                            hint_text = f"🎵 搜索结果: {keyword}\n共找到 {result_data.get('total', 0)} 首歌曲\n💡 点击回复按钮并输入序号即可播放，例如: 1\n[MID:{user_message_id}]"
 
                             yield event.chain_result([
                                 Comp.Plain(hint_text),
@@ -592,86 +593,174 @@ class Main(Star):
             logger.error(traceback.format_exc())
             platform = 'telegram'  # Telegram 平台默认值
 
-        # 检查是否引用了消息 - 从消息链中查找 Reply 组件
+        # Discord 平台特殊处理：尝试从事件对象中获取引用消息
         reply_msg = None
-        logger.info(f"检查 event 是否有 message_obj: {hasattr(event, 'message_obj')}")
-        if hasattr(event, 'message_obj'):
-            logger.info(f"检查 message_obj 是否有 message: {hasattr(event.message_obj, 'message')}")
-            if hasattr(event.message_obj, 'message'):
-                components = event.message_obj.message
-                logger.info(f"消息链组件数量: {len(components) if components else 0}")
-                logger.info(f"消息链组件类型: {[type(c).__name__ for c in components] if components else []}")
+        reply_message_id = None
 
-                # 遍历消息链查找 Reply 组件
-                for idx, comp in enumerate(components):
-                    logger.info(f"组件 {idx}: type={type(comp).__name__}, hasattr type={hasattr(comp, 'type')}")
-                    if hasattr(comp, 'type'):
-                        logger.info(f"组件 {idx} type={comp.type}")
-                        if comp.type == 'Reply':
-                            reply_msg = comp
-                            logger.info(f"找到 Reply 组件: {reply_msg}")
-                            break
+        if platform == 'discord':
+            logger.info("Discord 平台：尝试从事件对象获取引用消息")
+            # Discord 平台可能在 event 对象中存储引用消息信息
+            # 尝试多种可能的属性
+            if hasattr(event, 'message_obj'):
+                message_obj = event.message_obj
 
-        if not reply_msg:
+                # 方法1: 检查 message_obj 是否有 message_reference 属性
+                if hasattr(message_obj, 'message_reference'):
+                    logger.info(f"找到 message_reference: {message_obj.message_reference}")
+                    msg_ref = message_obj.message_reference
+                    if hasattr(msg_ref, 'message_id'):
+                        reply_message_id = str(msg_ref.message_id)
+                        logger.info(f"从 message_reference.message_id 获取到: {reply_message_id}")
+
+                # 方法2: 检查 message_obj 是否有 raw_message 属性（原始 Discord 消息对象）
+                if not reply_message_id and hasattr(message_obj, 'raw_message'):
+                    raw_msg = message_obj.raw_message
+                    logger.info(f"找到 raw_message: {type(raw_msg)}")
+                    if hasattr(raw_msg, 'reference') and raw_msg.reference:
+                        if hasattr(raw_msg.reference, 'message_id'):
+                            reply_message_id = str(raw_msg.reference.message_id)
+                            logger.info(f"从 raw_message.reference.message_id 获取到: {reply_message_id}")
+
+                # 方法3: 检查 message_obj 是否有 referenced_message_id 属性
+                if not reply_message_id and hasattr(message_obj, 'referenced_message_id'):
+                    reply_message_id = str(message_obj.referenced_message_id)
+                    logger.info(f"从 referenced_message_id 获取到: {reply_message_id}")
+
+                # 方法4: 检查 message_obj.message 中的 Reply 组件（有些 Discord 适配器可能使用）
+                if not reply_message_id and hasattr(message_obj, 'message'):
+                    components = message_obj.message
+                    if components:
+                        for comp in components:
+                            if hasattr(comp, 'type') and comp.type == 'Reply':
+                                reply_msg = comp
+                                logger.info(f"从消息链中找到 Reply 组件: {reply_msg}")
+                                break
+
+        # 非 Discord 平台：从消息链中查找 Reply 组件
+        else:
+            logger.info(f"检查 event 是否有 message_obj: {hasattr(event, 'message_obj')}")
+            if hasattr(event, 'message_obj'):
+                logger.info(f"检查 message_obj 是否有 message: {hasattr(event.message_obj, 'message')}")
+                if hasattr(event.message_obj, 'message'):
+                    components = event.message_obj.message
+                    logger.info(f"消息链组件数量: {len(components) if components else 0}")
+                    logger.info(f"消息链组件类型: {[type(c).__name__ for c in components] if components else []}")
+
+                    # 遍历消息链查找 Reply 组件
+                    for idx, comp in enumerate(components):
+                        logger.info(f"组件 {idx}: type={type(comp).__name__}, hasattr type={hasattr(comp, 'type')}")
+                        if hasattr(comp, 'type'):
+                            logger.info(f"组件 {idx} type={comp.type}")
+                            if comp.type == 'Reply':
+                                reply_msg = comp
+                                logger.info(f"找到 Reply 组件: {reply_msg}")
+                                break
+
+        # 如果没有找到引用消息，跳过播放
+        if not reply_msg and not reply_message_id:
             logger.info("没有引用消息，跳过播放")
             return
 
         # 检查引用的消息发送者是否是机器人自己
         # Telegram 平台: sender_id 是数字, bot_id 可能是字符串名称
         # QQ 平台: 两者都是数字字符串
-        if hasattr(reply_msg, 'sender_id'):
-            reply_sender_id = reply_msg.sender_id
-            bot_id = event.get_self_id()
-            platform = self._get_platform(event)
+        # Discord 平台: 直接使用 reply_message_id，不需要验证发送者（因为 reply_message_id 是机器人发送的消息ID）
 
-            # Telegram 特殊处理: 检查 Reply 组件的 sender_nickname 是否与 bot_id 匹配
-            if platform == 'telegram':
-                # 在 Telegram 上,bot_id 可能是机器人名称(如 'nekoMcServer_bot')
-                # 检查 Reply 组件是否有 sender_nickname 属性
-                if hasattr(reply_msg, 'sender_nickname'):
-                    reply_sender_name = reply_msg.sender_nickname
-                    if str(reply_sender_name) != str(bot_id):
-                        logger.info(f"Telegram: 引用消息发送者昵称: {reply_sender_name}, 机器人ID: {bot_id}，不匹配，跳过播放")
-                        return
+        if platform != 'discord' and reply_msg:
+            # 非 Discord 平台需要验证发送者
+            if hasattr(reply_msg, 'sender_id'):
+                reply_sender_id = reply_msg.sender_id
+                bot_id = event.get_self_id()
+
+                # Telegram 特殊处理: 检查 Reply 组件的 sender_nickname 是否与 bot_id 匹配
+                if platform == 'telegram':
+                    # 在 Telegram 上,bot_id 可能是机器人名称(如 'nekoMcServer_bot')
+                    # 检查 Reply 组件是否有 sender_nickname 属性
+                    if hasattr(reply_msg, 'sender_nickname'):
+                        reply_sender_name = reply_msg.sender_nickname
+                        if str(reply_sender_name) != str(bot_id):
+                            logger.info(f"Telegram: 引用消息发送者昵称: {reply_sender_name}, 机器人ID: {bot_id}，不匹配，跳过播放")
+                            return
+                    else:
+                        # 如果没有 sender_nickname,尝试其他方式验证
+                        logger.info(f"Telegram: Reply 组件缺少 sender_nickname，跳过验证")
                 else:
-                    # 如果没有 sender_nickname,尝试其他方式验证
-                    logger.info(f"Telegram: Reply 组件缺少 sender_nickname，跳过验证")
+                    # QQ 平台或其他平台: 直接比较 ID
+                    if str(reply_sender_id) != str(bot_id):
+                        logger.info(f"引用的消息发送者: {reply_sender_id}, 机器人ID: {bot_id}，不匹配，跳过播放")
+                        return
             else:
-                # QQ 平台或其他平台: 直接比较 ID
-                if str(reply_sender_id) != str(bot_id):
-                    logger.info(f"引用的消息发送者: {reply_sender_id}, 机器人ID: {bot_id}，不匹配，跳过播放")
-                    return
-        else:
-            logger.info("reply_msg 没有 sender_id 属性，跳过播放")
-            return
+                logger.info("reply_msg 没有 sender_id 属性，跳过播放")
+                return
 
         index = int(msg_text) - 1  # 转换为 0-based 索引
         logger.info(f"用户输入序号: {msg_text}, 转换后索引: {index}")
 
-        # 从引用消息中获取被引用消息的消息ID
-        reply_message_id = None
+        # Discord 平台：尝试从引用消息的内容中获取用户消息 ID
+        # 非 Discord 平台：从引用消息中获取被引用消息的消息ID
+        if platform == 'discord':
+            # Discord 平台：reply_message_id 是引用消息 ID（机器人发送的搜索结果消息）
+            # 我们需要从引用消息的文本中提取用户消息 ID
+            logger.info(f"Discord 平台：尝试从引用消息获取用户消息 ID")
 
-        # 方法1: 从引用消息的文本中提取 [MID:xxx] 格式的消息ID
-        if hasattr(reply_msg, 'text'):
-            import re
-            mid_match = re.search(r'\[MID:(\d+)\]', reply_msg.text)
-            if mid_match:
-                reply_message_id = mid_match.group(1)
-                logger.info(f"从引用消息文本中提取到消息ID: {reply_message_id}")
+            # 尝试从 message_obj 中获取引用消息的内容
+            user_message_id = None
+            if hasattr(event, 'message_obj') and hasattr(event.message_obj, 'message_obj'):
+                # Discord 平台可能有 referenced_message 属性
+                if hasattr(event.message_obj.message_obj, 'referenced_message'):
+                    ref_msg = event.message_obj.message_obj.referenced_message
+                    if hasattr(ref_msg, 'content'):
+                        import re
+                        mid_match = re.search(r'\[MID:(\d+)\]', ref_msg.content)
+                        if mid_match:
+                            user_message_id = mid_match.group(1)
+                            logger.info(f"从引用消息内容中提取到用户消息ID: {user_message_id}")
 
-        # 方法2: 如果没有找到，尝试直接使用Reply组件的id（这个是机器人回复的消息ID）
-        if not reply_message_id and hasattr(reply_msg, 'id'):
-            reply_message_id = str(reply_msg.id)
-            logger.info(f"从 Reply 组件 id 获取到消息ID: {reply_message_id}")
+            if not user_message_id:
+                # 尝试其他方式获取引用消息内容
+                if hasattr(event, 'message_obj') and hasattr(event.message_obj, 'raw_message'):
+                    raw_msg = event.message_obj.raw_message
+                    if hasattr(raw_msg, 'reference') and raw_msg.reference:
+                        if hasattr(raw_msg.reference, 'resolved') and raw_msg.reference.resolved:
+                            ref_msg = raw_msg.reference.resolved
+                            if hasattr(ref_msg, 'content'):
+                                import re
+                                mid_match = re.search(r'\[MID:(\d+)\]', ref_msg.content)
+                                if mid_match:
+                                    user_message_id = mid_match.group(1)
+                                    logger.info(f"从 raw_message.reference.resolved.content 中提取到用户消息ID: {user_message_id}")
 
-        # 方法3: 尝试从message_id获取
-        if not reply_message_id and hasattr(reply_msg, 'message_id'):
-            reply_message_id = str(reply_msg.message_id)
-            logger.info(f"从 Reply 组件 message_id 获取到消息ID: {reply_message_id}")
+            if not user_message_id:
+                logger.error(f"无法从引用消息中提取用户消息 ID")
+                return
 
-        if not reply_message_id:
-            logger.error("无法从 Reply 组件获取消息ID")
-            return
+            logger.info(f"Discord 平台：使用用户消息 ID = {user_message_id}")
+            reply_message_id = user_message_id
+        else:
+            # 从引用消息中获取被引用消息的消息ID
+            reply_message_id = None
+
+            # 方法1: 从引用消息的文本中提取 [MID:xxx] 格式的消息ID
+            if hasattr(reply_msg, 'text'):
+                import re
+                mid_match = re.search(r'\[MID:(\d+)\]', reply_msg.text)
+                if mid_match:
+                    reply_message_id = mid_match.group(1)
+                    logger.info(f"从引用消息文本中提取到消息ID: {reply_message_id}")
+
+            # 方法2: 如果没有找到，尝试直接使用Reply组件的id（这个是机器人回复的消息ID）
+            if not reply_message_id and hasattr(reply_msg, 'id'):
+                reply_message_id = str(reply_msg.id)
+                logger.info(f"从 Reply 组件 id 获取到消息ID: {reply_message_id}")
+
+            # 方法3: 尝试从message_id获取
+            if not reply_message_id and hasattr(reply_msg, 'message_id'):
+                reply_message_id = str(reply_msg.message_id)
+                logger.info(f"从 Reply 组件 message_id 获取到消息ID: {reply_message_id}")
+
+            if not reply_message_id:
+                logger.error("无法从 Reply 组件获取消息ID")
+                return
 
         logger.info(f"已保存的搜索结果消息ID: {list(self.search_results.keys())}")
 
@@ -704,8 +793,9 @@ class Main(Star):
         audio_url = f"{self.api_base_url}/api/music/file/{song_id}"
 
         # 先返回播放链接
+        send_type = "文件" if platform == 'discord' else "语音"
         yield event.chain_result([
-            Comp.Plain(f"🎶 Neko云音乐。听见好音乐\n🔗 {play_url}\n🎵 正在发送音乐，请稍后\n平台内均为无损音质，发送可能较慢，请耐心等待..."),
+            Comp.Plain(f"🎶 Neko云音乐。听见好音乐\n🔗 {play_url}\n🎵 正在发送音乐{send_type}，请稍后\n平台内均为无损音质，发送可能较慢，请耐心等待..."),
         ])
 
         # 下载音频并发送语音
@@ -720,14 +810,21 @@ class Main(Star):
                         logger.info(f"音频数据大小: {len(audio_data)} bytes ({audio_size_mb:.2f} MB)")
 
                         # 平台限制检查和音频压缩
+                        # Discord: 文件最大 10MB
                         # Telegram: 语音文件最大 50MB
                         # QQ: 语音消息通常限制在 10MB 以内
-                        max_size_mb = 50 if platform == 'telegram' else 10
-                        
+                        if platform == 'discord':
+                            max_size_mb = 10
+                        elif platform == 'telegram':
+                            max_size_mb = 50
+                        else:
+                            max_size_mb = 10
+
                         # 根据平台选择音频格式
-                        # Telegram 支持 MP3, OGG, M4A 等格式
-                        # QQ 主要支持 SILK/AMR 格式，但也支持发送音频文件
-                        audio_format = '.mp3' if platform == 'telegram' else '.mp3'
+                        # Discord: MP3 格式
+                        # Telegram: MP3 格式
+                        # QQ: MP3 格式
+                        audio_format = '.mp3'
 
                         # 保存为临时文件
                         import tempfile
@@ -803,18 +900,47 @@ class Main(Star):
                                 logger.error(traceback.format_exc())
                                 #yield event.plain_result(f"压缩失败，尝试发送原文件\n请直接点击播放链接收听: {play_url}")
 
-                        # 发送语音（使用 Record 组件，传入文件路径）
-                        # Record 组件会自动根据平台适配格式
-                        logger.info(f"开始发送语音到 {platform} 平台")
+                        # 发送音频
+                        # Discord 平台使用 File 组件发送音频文件
+                        # 其他平台使用 Record 组件发送语音
+                        logger.info(f"开始发送音频到 {platform} 平台")
+
+                        # 构建文件名（歌曲名 - 歌手.扩展名）
+                        # 需要从歌曲信息中获取歌手名
+                        artist = song.get("artist", song.get("singer", "未知歌手"))
+                        # 清理文件名中的非法字符
+                        import re
+                        safe_song_name = re.sub(r'[<>:"/\\|?*]', '', song_name)
+                        safe_artist = re.sub(r'[<>:"/\\|?*]', '', artist)
+                        filename = f"{safe_song_name} - {safe_artist}{audio_format}"
+
+                        # 重命名临时文件为歌曲名
+                        new_temp_path = os.path.join(os.path.dirname(temp_path), filename)
                         try:
-                            yield event.chain_result([
-                                Comp.Record(file=temp_path)
-                            ])
-                            logger.info("语音发送成功")
+                            os.rename(temp_path, new_temp_path)
+                            logger.info(f"文件已重命名: {temp_path} -> {new_temp_path}")
+                            temp_path = new_temp_path
+                        except Exception as rename_error:
+                            logger.warning(f"重命名文件失败: {str(rename_error)}，使用原文件名")
+
+                        try:
+                            if platform == 'discord':
+                                # Discord 使用 File 组件发送音频文件
+                                # 传入文件路径
+                                yield event.chain_result([
+                                    Comp.File(temp_path)
+                                ])
+                                logger.info("Discord 文件发送成功")
+                            else:
+                                # 其他平台使用 Record 组件发送语音
+                                yield event.chain_result([
+                                    Comp.Record(file=temp_path)
+                                ])
+                                logger.info("语音发送成功")
                         except Exception as send_error:
-                            logger.error(f"发送语音失败: {str(send_error)}")
+                            logger.error(f"发送失败: {str(send_error)}")
                             # 如果发送失败，提供备用方案
-                            yield event.plain_result(f"⚠️ 语音发送失败，请直接点击播放链接收听: {play_url}")
+                            yield event.plain_result(f"⚠️ 发送失败，请直接点击播放链接收听: {play_url}")
 
                         # 清理临时文件
                         try:
