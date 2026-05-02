@@ -11,6 +11,7 @@ from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 import astrbot.api.message_components as Comp
+import shutil
 
 
 class MusicSearchDrawer:
@@ -929,11 +930,11 @@ class Main(Star):
                         try:
                             if platform == 'discord':
                                 # Discord 使用 File 组件发送音频文件
-                                # 传入文件路径
+                                # 传入文件名和文件路径
                                 yield event.chain_result([
-                                    Comp.Record(file=temp_path)
+                                    Comp.File(name=filename, file=temp_path)
                                 ])
-                                logger.info("Discord 文件发送成功")
+                                logger.info("Discord 音频文件发送成功")
                             else:
                                 # 其他平台使用 Record 组件发送语音
                                 yield event.chain_result([
