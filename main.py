@@ -356,7 +356,7 @@ class MusicSearchDrawer:
             return None
 
 
-@register("nekomusic", "NyaNyagulugulu", "Neko云音乐点歌插件", "1.9.0", "https://github.com/NyaNyagulugulu/astrbot_NekoMusic")
+@register("nekomusic", "NyaNyagulugulu", "Neko云音乐点歌插件", "1.9.1", "https://github.com/NyaNyagulugulu/astrbot_NekoMusic")
 class Main(Star):
     def __init__(self, context: Context, config: dict = None):
         super().__init__(context)
