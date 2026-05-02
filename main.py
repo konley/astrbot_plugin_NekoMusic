@@ -863,6 +863,9 @@ class Main(Star):
                                     compressed_path
                                 ]
                                 
+                                # Ensure asyncio is available for subprocess creation
+                                import asyncio
+                                
                                 process = await asyncio.create_subprocess_exec(
                                     *compress_cmd,
                                     stdout=asyncio.subprocess.PIPE,
@@ -928,7 +931,7 @@ class Main(Star):
                                 # Discord 使用 File 组件发送音频文件
                                 # 传入文件路径
                                 yield event.chain_result([
-                                    Comp.File(temp_path)
+                                    Comp.Record(file=temp_path)
                                 ])
                                 logger.info("Discord 文件发送成功")
                             else:
@@ -942,12 +945,18 @@ class Main(Star):
                             # 如果发送失败，提供备用方案
                             yield event.plain_result(f"⚠️ 发送失败，请直接点击播放链接收听: {play_url}")
 
-                        # 清理临时文件
-                        try:
-                            os.unlink(temp_path)
-                            logger.info(f"已清理临时文件: {temp_path}")
-                        except Exception as cleanup_error:
-                            logger.warning(f"清理临时文件失败: {str(cleanup_error)}")
+                        # 清理临时文件：延迟到发送完成后再删（避免 Comp.Record 读取失败）
+                        import asyncio
+                        async def safe_cleanup(path):
+                            try:
+                                # 等待 1 秒，确保 AstrBot 已读取文件
+                                await asyncio.sleep(1.0)
+                                os.unlink(path)
+                                logger.info(f"✅ 已清理临时文件: {path}")
+                            except Exception as e:
+                                logger.warning(f"⚠️ 清理临时文件失败（可忽略）: {e}")
+                        # 在后台执行，不阻塞发送
+                        asyncio.create_task(safe_cleanup(temp_path))
                     else:
                         response_text = await audio_response.text()
                         logger.error(f"下载音频失败,状态码: {audio_response.status}, 响应: {response_text}")
