@@ -328,7 +328,7 @@ class MusicSearchDrawer:
 
             # 绘制底部版权（两行）
             footer_text1 = "Neko云音乐 - Powered by 不穿胖次の小奶猫"
-            footer_text2 = "music.cnmsb.xin | 蜀ICP备2025177767号-1"
+            footer_text2 = "music.cnmsb.xin | 黔ICP备2026007098号"
 
             # 第一行
             footer_bbox1 = draw.textbbox((0, 0), footer_text1, font=self.font_footer)
